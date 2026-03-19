@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Finance Pro</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <section class="auth-screen" id="authScreen">
+    <div class="auth-bg-orb orb-1"></div>
+    <div class="auth-bg-orb orb-2"></div>
+    <div class="auth-bg-orb orb-3"></div>
+
+    <div class="login-card-glass">
+      <div class="login-logo-top">
+        <img src="/img/logo1.jpg" alt="Logo Finance Pro" class="login-logo-img">
+      </div>
+
+      <div class="login-head-clean">
+        <h1>Finance</h1>
+        <p>Seu painel financeiro moderno e inteligente</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-auth="login">Login</button>
+        <button class="auth-tab" data-auth="register">Cadastro</button>
+      </div>
+
+      <form id="loginForm" class="auth-form active">
+        <div class="auth-field">
+          <input type="text" id="loginUsername" placeholder="Usuário" required>
+        </div>
+
+        <div class="auth-field">
+          <input type="password" id="loginPassword" placeholder="Senha" required>
+        </div>
+
+        <button type="submit" class="primary-btn full-btn">Entrar</button>
+
+        <p class="auth-switch-text">
+          Não tem conta?
+          <span class="switch-auth" data-open-auth="register">Cadastrar</span>
+        </p>
+      </form>
+
+      <form id="registerForm" class="auth-form">
+        <div class="auth-field">
+          <input type="text" id="registerName" placeholder="Nome completo" required>
+        </div>
+
+        <div class="auth-field">
+          <input type="text" id="registerUsername" placeholder="Usuário" required>
+        </div>
+
+        <div class="auth-field">
+          <input type="password" id="registerPassword" placeholder="Senha" required>
+        </div>
+
+        <button type="submit" class="primary-btn full-btn">Criar conta</button>
+
+        <p class="auth-switch-text">
+          Já tem conta?
+          <span class="switch-auth" data-open-auth="login">Entrar</span>
+        </p>
+      </form>
+
+     
+      <div class="login-bottom-wave"></div>
+    </div>
+  </section>
+
+  <div class="app hidden" id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-icon brand-icon-image">
+          <img src="/img/logo1.jpg" alt="Logo" class="sidebar-logo">
+        </div>
+        <div class="brand-text">
+          <strong>Finance </strong>
+          <span id="welcomeUser">Painel</span>
+        </div>
+      </div>
+
+      <nav class="menu">
+        <button class="tab-btn active" data-tab="dashboard">
+          <span class="menu-icon">▦</span>
+          <span class="menu-text">Dashboard</span>
+        </button>
+
+        <button class="tab-btn" data-tab="lancamentos">
+          <span class="menu-icon">₿</span>
+          <span class="menu-text">Lançamentos</span>
+        </button>
+
+        <button class="tab-btn" data-tab="metas">
+          <span class="menu-icon">◔</span>
+          <span class="menu-text">Metas</span>
+        </button>
+
+        <button id="logoutBtn" class="logout-btn">
+          <span class="menu-icon">↦</span>
+          <span class="menu-text">Sair</span>
+        </button>
+      </nav>
+    </aside>
+
+    <header class="mobile-topbar">
+      <button id="menuToggle" class="mobile-menu-btn" type="button">☰</button>
+      <div class="mobile-topbar-brand">
+        <img src="/img/logo1.jpg" alt="Logo" class="mobile-topbar-logo">
+        <span>Finance </span>
+      </div>
+    </header>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <span class="page-label">Visão geral</span>
+          <h1>Painel financeiro</h1>
+          <p>Resumo financeiro e desempenho visual.</p>
+        </div>
+
+    
+
+      <section class="summary-cards">
+        <article class="summary-card">
+          <span>Receitas</span>
+          <strong id="totalIncome">R$ 0,00</strong>
+          <canvas id="sparkIncome"></canvas>
+        </article>
+
+        <article class="summary-card">
+          <span>Despesas</span>
+          <strong id="totalExpense">R$ 0,00</strong>
+          <canvas id="sparkExpense"></canvas>
+        </article>
+
+        <article class="summary-card">
+          <span>Lucro</span>
+          <strong id="netProfit">R$ 0,00</strong>
+          <canvas id="sparkProfit"></canvas>
+        </article>
+
+        <article class="summary-card">
+          <span>Margem</span>
+          <strong id="profitMargin">0%</strong>
+          <canvas id="sparkMargin"></canvas>
+        </article>
+      </section>
+
+      <section class="tab-content active" id="dashboard">
+        <div class="dashboard-grid">
+          <section class="panel panel-wide">
+            <div class="panel-head">
+              <h2>Receitas x Despesas por mês</h2>
+            </div>
+            <canvas id="monthlyBarChart"></canvas>
+          </section>
+
+          <section class="panel compact-metrics">
+            <div class="metric-box">
+              <span>Receita total</span>
+              <strong id="metricIncome">R$ 0,00</strong>
+            </div>
+            <div class="metric-box">
+              <span>Despesa total</span>
+              <strong id="metricExpense">R$ 0,00</strong>
+            </div>
+            <div class="metric-box">
+              <span>Lucro atual</span>
+              <strong id="metricProfit">R$ 0,00</strong>
+            </div>
+            <div class="metric-box">
+              <span>Recorrentes</span>
+              <strong id="metricRecurring">0</strong>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Fluxo financeiro</h2>
+            </div>
+            <canvas id="lineFlowChart"></canvas>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Despesas por categoria</h2>
+            </div>
+            <canvas id="categoryChart"></canvas>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Meta principal</h2>
+            </div>
+            <canvas id="goalGaugeChart"></canvas>
+            <p class="gauge-text" id="goalGaugeText">0%</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Saúde financeira</h2>
+            </div>
+            <canvas id="radarChart"></canvas>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-content" id="lancamentos">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Novo lançamento</h2>
+          </div>
+
+          <form id="financeForm" class="finance-form-small">
+            <input type="hidden" id="editId">
+
+            <div class="form-row">
+              <div class="select-wrap">
+                <select id="entryType" required>
+                  <option value="income">Receita</option>
+                  <option value="expense">Despesa</option>
+                </select>
+              </div>
+
+              <div class="select-wrap">
+                <select id="categoryId">
+                  <option value="">Categoria</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="select-wrap">
+                <select id="recurrence" required>
+                  <option value="monthly">Recorrente mensal</option>
+                  <option value="one_time">Lançamento avulso</option>
+                </select>
+              </div>
+
+              <input type="date" id="transactionDate" required>
+            </div>
+
+            <div class="form-row single">
+              <input type="text" id="description" placeholder="Descrição do lançamento" required>
+            </div>
+
+            <div class="form-row single">
+              <input type="number" id="amount" placeholder="Valor" step="0.01" required>
+            </div>
+
+            <div class="form-button-row">
+              <button type="submit" class="primary-btn">Salvar</button>
+              <button type="button" id="cancelEditBtn" class="ghost-btn">Cancelar edição</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Lançamentos</h2>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Categoria</th>
+                  <th>Descrição</th>
+                  <th>Recorrência</th>
+                  <th>Data</th>
+                  <th>Valor</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="financeTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-content" id="metas">
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Criar meta financeira</h2>
+            </div>
+
+            <form id="goalForm" class="goal-form">
+              <input type="text" id="goalName" placeholder="Nome da meta" required>
+              <input type="number" id="goalTarget" placeholder="Valor da meta" step="0.01" required>
+              <input type="date" id="goalDeadline">
+              <button type="submit" class="primary-btn">Criar meta</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Status das metas</h2>
+            </div>
+            <p id="goalSummary" class="muted">Nenhuma meta cadastrada.</p>
+            <div id="goalList" class="goal-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
