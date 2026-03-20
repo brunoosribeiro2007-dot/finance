@@ -5,9 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Finance Pro</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#67aefc">
+  <link rel="apple-touch-icon" href="/img/logo1.jpg">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
+  <div id="toastContainer" class="toast-container"></div>
+
   <section class="auth-screen" id="authScreen">
     <div class="auth-bg-orb orb-1"></div>
     <div class="auth-bg-orb orb-2"></div>
@@ -85,25 +91,44 @@
 
       <nav class="menu">
         <button class="tab-btn active" data-tab="dashboard">
-          <span class="menu-icon">▦</span>
+          <span class="menu-icon"><i class="ph ph-squares-four"></i></span>
           <span class="menu-text">Dashboard</span>
         </button>
 
         <button class="tab-btn" data-tab="lancamentos">
-          <span class="menu-icon">₿</span>
+          <span class="menu-icon"><i class="ph ph-list-dashes"></i></span>
           <span class="menu-text">Lançamentos</span>
         </button>
 
         <button class="tab-btn" data-tab="metas">
-          <span class="menu-icon">◔</span>
+          <span class="menu-icon"><i class="ph ph-target"></i></span>
           <span class="menu-text">Metas</span>
         </button>
 
+        <button class="tab-btn" data-tab="perfis">
+          <span class="menu-icon"><i class="ph ph-users"></i></span>
+          <span class="menu-text">Perfis</span>
+        </button>
+
+        <button class="tab-btn" data-tab="calculadora">
+          <span class="menu-icon"><i class="ph ph-calculator"></i></span>
+          <span class="menu-text">Calculadora</span>
+        </button>
+
+        <button class="tab-btn" data-tab="historico">
+          <span class="menu-icon"><i class="ph ph-clock-counter-clockwise"></i></span>
+          <span class="menu-text">Histórico</span>
+        </button>
+
         <button id="logoutBtn" class="logout-btn">
-          <span class="menu-icon">↦</span>
+          <span class="menu-icon"><i class="ph ph-sign-out"></i></span>
           <span class="menu-text">Sair</span>
         </button>
       </nav>
+
+      <div class="sidebar-footer" style="position: absolute; bottom: 20px; left: 16px; right: 16px; text-align: left;">
+        <p class="menu-text" style="font-size: 0.75rem; color: #6d819b;">Desenvolvedor:<br><strong style="color:#11233c;">Bruno Ribeiro</strong></p>
+      </div>
     </aside>
 
     <header class="mobile-topbar">
@@ -122,7 +147,23 @@
           <p>Resumo financeiro e desempenho visual.</p>
         </div>
 
-    
+        <div class="profile-selector" id="profileSelectorWrapper" style="display: flex; gap: 14px; align-items: center; margin-right: auto; flex-wrap: wrap; justify-content: flex-start;">
+          <label for="activeProfile" style="color: #6d819b; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Perfil Ativo:</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <div class="custom-select-wrapper" id="profileCustomWrapper" style="display: none;">
+              <div class="custom-select-trigger" id="profileCustomTrigger">
+                <span id="profileCustomText">Carregando...</span>
+                <span class="custom-select-arrow">▼</span>
+              </div>
+              <div class="custom-select-options" id="profileCustomOptions"></div>
+            </div>
+            <select id="activeProfile" style="display: none;"></select>
+            <button id="createProfileLink" type="button" class="primary-btn" style="padding: 10px 18px; display: none; border-radius: 999px;">+ Novo</button>
+          </div>
+          
+          <p id="noProfileMsg" style="color: #ff7d95; font-size: 0.9rem; font-weight: 600; display: none; cursor: pointer;">Nenhum perfil ativo. <u>Crie um agora!</u></p>
+        </div>
+      </header>
 
       <section class="summary-cards">
         <article class="summary-card">
@@ -151,6 +192,14 @@
       </section>
 
       <section class="tab-content active" id="dashboard">
+        
+        <section class="panel panel-wide insight-panel">
+          <div class="panel-head" style="margin-bottom: 12px;">
+            <h2><span style="font-size: 1.2em;">🧠</span> Previsão Inteligente</h2>
+          </div>
+          <p id="insightText" class="insight-text">Analisando seus hábitos de consumo...</p>
+        </section>
+
         <div class="dashboard-grid">
           <section class="panel panel-wide">
             <div class="panel-head">
@@ -244,8 +293,9 @@
               <input type="date" id="transactionDate" required>
             </div>
 
-            <div class="form-row single">
-              <input type="text" id="description" placeholder="Descrição do lançamento" required>
+            <div class="form-row single" style="position: relative;">
+              <input type="text" id="description" placeholder="Descrição do lançamento" autocomplete="off" required>
+              <div id="descriptionSuggestions" class="suggestions-box hidden"></div>
             </div>
 
             <div class="form-row single">
@@ -307,9 +357,168 @@
           </section>
         </div>
       </section>
+
+      <section class="tab-content" id="perfis">
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Criar novo perfil</h2>
+            </div>
+
+            <form id="profileForm" class="goal-form">
+              <input type="text" id="profileName" placeholder="Nome do perfil (ex: Casa, Sítio, Pessoal)" required>
+              <button type="submit" class="primary-btn">Criar Perfil</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Perfis existentes</h2>
+            </div>
+            <p id="profileSummary" class="muted">Nenhum perfil cadastrado.</p>
+            <div id="profileList" class="goal-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-content" id="calculadora">
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Calculadora de Juros Compostos</h2>
+            </div>
+
+            <form id="calcForm" class="goal-form">
+              <div class="form-row">
+                <div class="auth-field">
+                  <label for="calcInitial" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Valor Inicial (R$)</label>
+                  <input type="number" id="calcInitial" placeholder="Ex: 1000" required min="0" step="0.01">
+                </div>
+                <div class="auth-field">
+                  <label for="calcMonthly" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Depósito Mensal (R$)</label>
+                  <input type="number" id="calcMonthly" placeholder="Ex: 500" required min="0" step="0.01">
+                </div>
+              </div>
+              
+              <div class="form-row">
+                <div class="auth-field">
+                  <label for="calcRate" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Taxa de Juros (%)</label>
+                  <input type="number" id="calcRate" placeholder="Ex: 10" required min="0" step="0.01">
+                </div>
+                <div class="auth-field">
+                  <label for="calcRateType" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Tipo de Taxa</label>
+                  <div class="select-wrap">
+                    <select id="calcRateType">
+                      <option value="anual">Anual</option>
+                      <option value="mensal">Mensal</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="auth-field">
+                  <label for="calcYears" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Duração (Anos)</label>
+                  <input type="number" id="calcYears" placeholder="Ex: 5" value="0" min="0">
+                </div>
+                <div class="auth-field">
+                  <label for="calcMonths" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Duração (Meses)</label>
+                  <input type="number" id="calcMonths" placeholder="Ex: 0" value="0" min="0">
+                </div>
+              </div>
+
+              <div class="form-row single">
+                <div class="auth-field">
+                  <label for="calcDate" style="display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500;">Data do Início</label>
+                  <input type="date" id="calcDate" required>
+                </div>
+              </div>
+
+              <button type="submit" class="primary-btn" style="margin-top: 10px;">Calcular Evolução</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Resultados</h2>
+            </div>
+            <div class="compact-metrics" style="margin-bottom: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+              <div class="metric-box">
+                <span style="font-size: 0.8rem;">Investido</span>
+                <strong id="calcTotalInvested" style="font-size: 1.1rem;">R$ 0,00</strong>
+              </div>
+              <div class="metric-box">
+                <span style="font-size: 0.8rem;">Em Juros</span>
+                <strong id="calcTotalInterest" style="color: var(--success); font-size: 1.1rem;">R$ 0,00</strong>
+              </div>
+              <div class="metric-box" style="background: var(--blue-soft); border-color: rgba(79, 70, 229, 0.2);">
+                <span style="color: var(--blue-strong); font-size: 0.8rem;">Saldo Final</span>
+                <strong id="calcFinalBalance" style="color: var(--blue-strong); font-size: 1.2rem;">R$ 0,00</strong>
+              </div>
+            </div>
+
+            <div class="panel-head">
+              <h2>Evolução Patrimonial</h2>
+            </div>
+            <div style="position: relative; height: 300px; width: 100%;">
+              <canvas id="compoundChart"></canvas>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-content" id="historico">
+        <section class="panel" style="background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(244,249,255,0.95) 100%); border: 1px solid rgba(103,174,252,0.25);">
+          <div class="panel-head" style="margin-bottom: 16px;">
+            <h2 style="display: flex; align-items: center; gap: 10px; color: var(--blue-strong); font-size: 1.5rem;">
+              <i class="ph ph-magnifying-glass" style="font-size: 1.8rem; color: var(--blue);"></i> 
+              Busca Inteligente
+            </h2>
+          </div>
+          <div class="form-row single">
+            <input type="search" id="globalSearch" class="search-input-premium" placeholder="Pesquisar por nome, categoria ou valor... (Ex: Luz, Mercado, 150)">
+          </div>
+        </section>
+
+        <section class="panel" style="background: transparent; border: none; box-shadow: none; padding: 0; margin-top: 36px;">
+          <div class="panel-head" style="margin-bottom: 16px;">
+            <h2 style="display: flex; align-items: center; gap: 8px; color: var(--blue-strong); font-size: 1.3rem;"><i class="ph ph-calendar-blank" style="font-size: 1.6rem;"></i> Meses Passados</h2>
+          </div>
+          <div id="historyGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; margin-top: 10px;">
+            <!-- cards injected by JS -->
+          </div>
+        </section>
+      </section>
+
     </main>
   </div>
 
-  <script src="script.js"></script>
+  <div id="historyModal" class="hidden" style="position: fixed; inset: 0; background: rgba(17,35,60,0.4); backdrop-filter: blur(8px); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+    <div style="background: var(--panel-strong); border-radius: 24px; width: 95%; max-width: 850px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 30px 60px rgba(17,35,60,0.2);">
+      <div style="padding: 24px 32px; border-bottom: 1px solid rgba(168,187,214,0.3); display: flex; justify-content: space-between; align-items: center;">
+        <h2 id="historyModalTitle" style="color: var(--blue-strong); font-size: 1.4rem;">Detalhes do Mês</h2>
+        <button id="closeHistoryModal" style="background: none; font-size: 1.5rem; color: var(--danger); outline: none; border: none; cursor: pointer; font-weight: bold; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s;"><i class="ph ph-x"></i></button>
+      </div>
+      <div style="padding: 24px 32px; overflow-y: auto; flex: 1;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Categoria</th>
+                <th>Descrição</th>
+                <th>Data</th>
+                <th>Valor</th>
+              </tr>
+            </thead>
+            <tbody id="historyModalTable">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="script.js"></script>
 </body>
 </html>

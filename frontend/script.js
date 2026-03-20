@@ -1,6 +1,29 @@
-const API_URL = "/api";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+import { 
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, 
+  onAuthStateChanged, signOut 
+} from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+import { 
+  getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, orderBy 
+} from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
 
-let currentUser = JSON.parse(localStorage.getItem("currentUser")) || null;
+const firebaseConfig = {
+  apiKey: "AIzaSyBKZHMXu5glCjMRVf5mvu7GLalHvYSBIvI",
+  authDomain: "financepro-62da9.firebaseapp.com",
+  projectId: "financepro-62da9",
+  storageBucket: "financepro-62da9.firebasestorage.app",
+  messagingSenderId: "103610899044",
+  appId: "1:103610899044:web:1dd56731cc406ebc319d71"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+
+let currentUser = null;
+let activeProfileId = null;
+
+let profiles = [];
 let transactions = [];
 let goals = [];
 let categories = [];
@@ -14,6 +37,7 @@ let lineFlowChart = null;
 let categoryChart = null;
 let goalGaugeChart = null;
 let radarChart = null;
+let compoundChart = null;
 let sparkIncome = null;
 let sparkExpense = null;
 let sparkProfit = null;
@@ -28,6 +52,14 @@ const loginForm = document.getElementById("loginForm");
 const registerForm = document.getElementById("registerForm");
 const financeForm = document.getElementById("financeForm");
 const goalForm = document.getElementById("goalForm");
+const profileForm = document.getElementById("profileForm");
+
+const activeProfileText = document.getElementById("activeProfileText");
+const noProfileMsg = document.getElementById("noProfileMsg");
+
+const profileSelector = document.getElementById("activeProfile");
+const profileList = document.getElementById("profileList");
+const profileSummary = document.getElementById("profileSummary");
 
 const loginUsername = document.getElementById("loginUsername");
 const loginPassword = document.getElementById("loginPassword");
@@ -55,8 +87,33 @@ function destroyChart(chartInstance) {
   if (chartInstance) chartInstance.destroy();
 }
 
+function showToast(message, type = "success") {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  
+  let icon = "✓";
+  if (type === "error") icon = "✕";
+  if (type === "warning") icon = "⚠";
+
+  toast.innerHTML = `
+    <div style="font-weight: 800; font-size: 1.1rem; opacity: 0.8;">${icon}</div>
+    <span class="toast-message">${message}</span>
+  `;
+  container.appendChild(toast);
+  
+  setTimeout(() => toast.classList.add("show"), 10);
+  
+  setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 400);
+  }, 4000);
+}
+
 function buildQueryString() {
   const params = new URLSearchParams();
+  if (activeProfileId) params.set("profile_id", activeProfileId);
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   const query = params.toString();
@@ -137,10 +194,22 @@ function chartScales() {
 function updateSummaryCards() {
   const { income, expense, profit, margin } = getSummaryData();
 
-  document.getElementById("totalIncome").textContent = formatCurrency(income);
-  document.getElementById("totalExpense").textContent = formatCurrency(expense);
-  document.getElementById("netProfit").textContent = formatCurrency(profit);
-  document.getElementById("profitMargin").textContent = `${margin}%`;
+  const elTotalIncome = document.getElementById("totalIncome");
+  const elTotalExpense = document.getElementById("totalExpense");
+  const elNetProfit = document.getElementById("netProfit");
+  const elProfitMargin = document.getElementById("profitMargin");
+
+  elTotalIncome.textContent = formatCurrency(income);
+  elTotalIncome.style.color = "var(--blue)";
+
+  elTotalExpense.textContent = formatCurrency(expense);
+  elTotalExpense.style.color = "var(--danger)";
+
+  elNetProfit.textContent = formatCurrency(profit);
+  elNetProfit.style.color = profit >= 0 ? "var(--success)" : "var(--danger)";
+
+  elProfitMargin.textContent = `${margin}%`;
+  elProfitMargin.style.color = margin >= 0 ? "var(--success)" : "var(--danger)";
 
   document.getElementById("metricIncome").textContent = formatCurrency(income);
   document.getElementById("metricExpense").textContent = formatCurrency(expense);
@@ -165,6 +234,7 @@ function renderTransactions() {
   financeTable.innerHTML = transactions.map((item) => {
     const typeLabel = item.type === "income" ? "Receita" : "Despesa";
     const recurrenceLabel = item.recurrence === "monthly" ? "Mensal" : "Avulsa";
+    const isClone = typeof item.id === 'string' && item.id.includes('_rec_');
 
     return `
       <tr>
@@ -172,17 +242,95 @@ function renderTransactions() {
         <td>${item.category_name || "-"}</td>
         <td>${item.description}</td>
         <td>${recurrenceLabel}</td>
-        <td>${new Date(item.transaction_date).toLocaleDateString("pt-BR")}</td>
+        <td>${new Date(item.transaction_date + 'T12:00:00').toLocaleDateString("pt-BR")}</td>
         <td>${formatCurrency(item.amount)}</td>
         <td>
           <div class="actions">
+            ${!isClone ? `
             <button type="button" onclick="editTransaction(${item.id})">Editar</button>
             <button type="button" class="danger-btn" onclick="removeTransaction(${item.id})">Excluir</button>
+            ` : `<span class="muted" style="font-size: 0.75rem;">(Automático)</span>`}
           </div>
         </td>
       </tr>
     `;
   }).join("");
+}
+
+function renderHistoryTab() {
+  const grid = document.getElementById("historyGrid");
+  if (!grid) return;
+
+  const map = {};
+  transactions.forEach(t => {
+    const key = t.transaction_date.slice(0, 7);
+    if (!map[key]) map[key] = { income: 0, expense: 0, txs: [] };
+    if (t.type === "income") map[key].income += Number(t.amount);
+    else map[key].expense += Number(t.amount);
+    map[key].txs.push(t);
+  });
+
+  const sortedKeys = Object.keys(map).sort().reverse();
+
+  grid.innerHTML = sortedKeys.map(key => {
+    const data = map[key];
+    const [yyyy, mm] = key.split("-");
+    const dateObj = new Date(Number(yyyy), Number(mm) - 1, 1);
+    const monthName = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    const profit = data.income - data.expense;
+
+    return `
+      <div class="history-card" style="background: var(--panel-strong); border: 1px solid rgba(168,187,214,0.3); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 8px 25px rgba(63,104,160,0.06); transition: transform 0.2s, box-shadow 0.2s;">
+        <div style="text-transform: capitalize; font-weight: 700; font-size: 1.15rem; color: var(--blue-strong); border-bottom: 2px solid rgba(103,174,252,0.15); padding-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+          📅 ${monthName}
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.95rem;">
+          <div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Receitas</span> <strong style="color: var(--blue);">${formatCurrency(data.income)}</strong></div>
+          <div style="display: flex; justify-content: space-between;"><span style="color: var(--muted);">Despesas</span> <strong style="color: var(--danger);">${formatCurrency(data.expense)}</strong></div>
+          <div style="display: flex; justify-content: space-between; margin-top: 4px; padding-top: 10px; border-top: 1px dashed rgba(168,187,214,0.3);"><span style="color: #11233c; font-weight: 700;">Saldo Líquido</span> <strong style="color: ${profit >= 0 ? 'var(--success)' : 'var(--danger)'}; font-size: 1.05rem;">${formatCurrency(profit)}</strong></div>
+        </div>
+        <button class="ghost-btn" onclick="openHistoryModal('${key}')" style="margin-top: auto; padding: 12px; width: 100%; border-radius: 12px; font-weight: 600; font-size: 0.9rem; background: var(--bg-soft); border: 1px solid rgba(168, 187, 214, 0.4); color: var(--blue-strong); cursor: pointer;">Ver Detalhes</button>
+      </div>
+    `;
+  }).join("");
+}
+
+window.openHistoryModal = function(yearMonthKey) {
+  const modal = document.getElementById("historyModal");
+  const title = document.getElementById("historyModalTitle");
+  const tableBody = document.getElementById("historyModalTable");
+  
+  if (!modal || !title || !tableBody) return;
+
+  const [yyyy, mm] = yearMonthKey.split("-");
+  const dateObj = new Date(Number(yyyy), Number(mm) - 1, 1);
+  const monthName = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  
+  title.innerHTML = `<i class="ph ph-calendar-blank"></i> <span style="text-transform: capitalize;">${monthName}</span>`;
+
+  const txs = transactions.filter(t => t.transaction_date.startsWith(yearMonthKey));
+  
+  tableBody.innerHTML = txs.map(m => {
+    const typeLabel = m.type === "income" ? "Receita" : "Despesa";
+    return `
+      <tr>
+        <td><span class="tag ${m.type === "income" ? "tag-income" : "tag-expense"}">${typeLabel}</span></td>
+        <td>${m.category_name || "-"}</td>
+        <td>${m.description}</td>
+        <td>${new Date(m.transaction_date + 'T12:00:00').toLocaleDateString("pt-BR")}</td>
+        <td>${formatCurrency(m.amount)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  modal.classList.remove("hidden");
+};
+
+const closeHistoryModal = document.getElementById("closeHistoryModal");
+if (closeHistoryModal) {
+  closeHistoryModal.addEventListener("click", () => {
+    document.getElementById("historyModal").classList.add("hidden");
+  });
 }
 
 function renderGoals() {
@@ -305,44 +453,43 @@ function buildDashboardCharts() {
           label: "Receitas",
           data: monthly.income.length ? monthly.income : [0],
           backgroundColor: "#67aefc",
-          borderRadius: 10
+          borderRadius: 8,
+          barPercentage: 0.6
         },
         {
           label: "Despesas",
           data: monthly.expense.length ? monthly.expense : [0],
           backgroundColor: "#b8dbff",
-          borderRadius: 10
+          borderRadius: 8,
+          barPercentage: 0.6
         }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#6d819b" } } },
+      plugins: { legend: { labels: { color: "#6d819b", usePointStyle: true, padding: 20 } } },
       scales: chartScales()
     }
   });
 
   lineFlowChart = new Chart(document.getElementById("lineFlowChart"), {
-    type: "line",
+    type: "bar",
     data: {
       labels: monthly.labels.length ? monthly.labels : ["Sem dados"],
       datasets: [
         {
           label: "Lucro",
           data: monthly.profit.length ? monthly.profit : [0],
-          borderColor: "#4e9af3",
-          backgroundColor: "rgba(103, 174, 252, 0.18)",
-          fill: true,
-          tension: 0.35,
-          pointRadius: 2
+          backgroundColor: monthly.profit.map(val => val >= 0 ? "#67aefc" : "#ff7d95"),
+          borderRadius: 6
         }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#6d819b" } } },
+      plugins: { legend: { display: false } },
       scales: chartScales()
     }
   });
@@ -362,15 +509,18 @@ function buildDashboardCharts() {
             "#8fb9e8",
             "#5f90cf"
           ],
-          borderWidth: 0
+          borderWidth: 2,
+          borderColor: "#ffffff",
+          hoverOffset: 6
         }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#6d819b" } } },
-      cutout: "70%"
+      plugins: { legend: { position: "right", labels: { color: "#6d819b", usePointStyle: true } } },
+      cutout: "75%",
+      layout: { padding: 10 }
     }
   });
 
@@ -439,30 +589,218 @@ function buildDashboardCharts() {
 }
 
 async function loadCategories() {
-  const response = await fetch(`${API_URL}/categories/${currentUser.id}`);
-  categories = await response.json();
+  if (!activeProfileId) return categories = [];
+  try {
+    const q = query(collection(db, "categories"), where("profile_id", "==", activeProfileId));
+    const snap = await getDocs(q);
+    categories = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    // Inject defaults if empty
+    if (categories.length === 0) {
+      const defaults = [
+        { name: "Salário", type: "income" },
+        { name: "Vendas", type: "income" },
+        { name: "Outras Receitas", type: "income" },
+        { name: "Moradia", type: "expense" },
+        { name: "Alimentação", type: "expense" },
+        { name: "Transporte", type: "expense" },
+        { name: "Lazer", type: "expense" }
+      ];
+      for (const c of defaults) {
+        const docRef = await addDoc(collection(db, "categories"), { ...c, profile_id: activeProfileId });
+        categories.push({ id: docRef.id, ...c, profile_id: activeProfileId });
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    categories = [];
+  }
+}
+
+function expandRecurring(list) {
+  const expanded = [];
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+
+  list.forEach(t => {
+    expanded.push({...t}); // Always keep original
+
+    if (t.recurrence === "monthly") {
+      const d = new Date(t.transaction_date + 'T12:00:00');
+      let tYear = d.getFullYear();
+      let tMonth = d.getMonth();
+
+      let targetYear = tYear;
+      let targetMonth = tMonth + 1;
+
+      // Expand to +1 month into the future for predictability graphs
+      while (targetYear < currentYear || (targetYear === currentYear && targetMonth <= currentMonth + 1)) {
+        if (targetYear > tYear || (targetYear === tYear && targetMonth > tMonth)) {
+          const clone = { ...t };
+          
+          let day = d.getDate();
+          const maxDays = new Date(targetYear, targetMonth + 1, 0).getDate();
+          if (day > maxDays) day = maxDays;
+          
+          const strMonth = String(targetMonth + 1).padStart(2, '0');
+          const strDay = String(day).padStart(2, '0');
+          clone.transaction_date = `${targetYear}-${strMonth}-${strDay}`;
+          clone.id = `${t.id}_rec_${targetYear}_${strMonth}`; // Identifiable pseudo ID
+          
+          expanded.push(clone);
+        }
+
+        targetMonth++;
+        if (targetMonth > 11) {
+          targetMonth = 0;
+          targetYear++;
+        }
+      }
+    }
+  });
+
+  return expanded.sort((a,b) => new Date(b.transaction_date) - new Date(a.transaction_date));
 }
 
 async function loadTransactions() {
-  const response = await fetch(`${API_URL}/transactions/${currentUser.id}${buildQueryString()}`);
-  transactions = await response.json();
+  if (!activeProfileId) return transactions = [];
+  try {
+    const q = query(collection(db, "transactions"), where("profile_id", "==", activeProfileId));
+    const snap = await getDocs(q);
+    const rawData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    transactions = expandRecurring(rawData);
+  } catch(err) {
+    console.error(err);
+    transactions = [];
+  }
 }
 
 async function loadGoals() {
-  const response = await fetch(`${API_URL}/goals/${currentUser.id}`);
-  goals = await response.json();
+  if (!activeProfileId) return goals = [];
+  try {
+    const q = query(collection(db, "goals"), where("profile_id", "==", activeProfileId));
+    const snap = await getDocs(q);
+    goals = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch(err) {
+    console.error(err);
+    goals = [];
+  }
+}
+
+async function loadCurrentUser() {
+  const response = await fetch("/api/me");
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data?.success) {
+    currentUser = null;
+    localStorage.removeItem("currentUser");
+    app.classList.add("hidden");
+    authScreen.classList.remove("hidden");
+    return false;
+  }
+
+  currentUser = data.user;
+  localStorage.setItem("currentUser", JSON.stringify(currentUser));
+  return true;
+}
+async function loadProfiles() {
+  if (!currentUser) {
+    profiles = [];
+    return;
+  }
+  
+  try {
+    const q = query(collection(db, "profiles"), where("user_id", "==", currentUser.id));
+    const snap = await getDocs(q);
+    profiles = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch(err) {
+    console.error(err);
+    profiles = [];
+  }
+
+  if (profiles.length === 0) {
+    if (document.getElementById("profileCustomWrapper")) document.getElementById("profileCustomWrapper").style.display = "none";
+    if (document.getElementById("createProfileLink")) document.getElementById("createProfileLink").style.display = "none";
+    noProfileMsg.style.display = "inline";
+    activeProfileId = null;
+    localStorage.removeItem("activeProfileId");
+    profileList.innerHTML = "";
+    profileSummary.textContent = "Nenhum perfil cadastrado.";
+  } else {
+    if (document.getElementById("profileCustomWrapper")) document.getElementById("profileCustomWrapper").style.display = "block";
+    if (document.getElementById("createProfileLink")) document.getElementById("createProfileLink").style.display = "inline-block";
+    noProfileMsg.style.display = "none";
+
+    profileSelector.innerHTML = profiles
+      .map((p) => `<option value="${p.id}">${p.name}</option>`)
+      .join("");
+
+    if (!activeProfileId || !profiles.some(p => p.id === activeProfileId)) {
+      activeProfileId = profiles[0].id;
+      localStorage.setItem("activeProfileId", activeProfileId);
+    }
+    profileSelector.value = activeProfileId;
+
+    const customOptions = document.getElementById("profileCustomOptions");
+    const customText = document.getElementById("profileCustomText");
+    if (customOptions) {
+      customOptions.innerHTML = profiles.map(p => `
+        <div class="custom-option ${p.id == activeProfileId ? 'selected' : ''}" data-id="${p.id}">
+          ${p.name}
+        </div>
+      `).join("");
+      
+      const activeP = profiles.find(p => p.id == activeProfileId);
+      if (customText) customText.textContent = activeP ? activeP.name : "Selecione";
+    }
+
+    profileSummary.textContent = `${profiles.length} perfil(is) cadastrado(s).`;
+    profileList.innerHTML = profiles.map(p => {
+      const icon = p.name.toLowerCase().includes("casa") ? "🏠" : 
+                   p.name.toLowerCase().includes("sítio") || p.name.toLowerCase().includes("sitio") ? "🌳" : "📁";
+      return `
+      <div class="profile-list-item">
+        <div class="profile-icon">${icon}</div>
+        <div>
+          <strong style="font-size: 1.1rem; color: #11233c;">${p.name}</strong>
+          <p class="muted" style="margin-top: 4px; font-size: 0.85rem;">Criado em: ${new Date(p.created_at).toLocaleDateString("pt-BR")}</p>
+        </div>
+      </div>
+    `}).join("");
+  }
 }
 
 async function refreshUI() {
-  if (!currentUser) return;
+  await loadProfiles();
   await loadCategories();
   await loadTransactions();
   await loadGoals();
-  updateSummaryCards();
-  renderCategoryOptions(entryType.value);
   renderTransactions();
   renderGoals();
+  renderHistoryTab();
+  generateInsights();
+  updateSummaryCards();
   buildDashboardCharts();
+  renderCategoryOptions(entryType ? entryType.value : "income");
+}
+
+function loadCurrentUser() {
+  return new Promise((resolve) => {
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        currentUser = { id: user.uid, email: user.email };
+        localStorage.setItem("currentUser", JSON.stringify(currentUser));
+        resolve(true);
+      } else {
+        currentUser = null;
+        localStorage.removeItem("currentUser");
+        app.classList.add("hidden");
+        authScreen.classList.remove("hidden");
+        resolve(false);
+      }
+    });
+  });
 }
 
 window.editTransaction = function (id) {
@@ -483,73 +821,70 @@ window.editTransaction = function (id) {
 };
 
 window.removeTransaction = async function (id) {
-  const response = await fetch(`${API_URL}/transactions/${id}`, { method: "DELETE" });
-  if (response.ok) await refreshUI();
+  try {
+    await deleteDoc(doc(db, "transactions", String(id)));
+    await refreshUI();
+  } catch(err) {
+    console.error(err);
+    showToast("Erro ao excluir lançamento.", "error");
+  }
 };
 
 window.removeGoal = async function (id) {
-  const response = await fetch(`${API_URL}/goals/${id}`, { method: "DELETE" });
-  if (response.ok) await refreshUI();
+  try {
+    await deleteDoc(doc(db, "goals", String(id)));
+    await refreshUI();
+  } catch(err) {
+    console.error(err);
+    showToast("Erro ao excluir meta.", "error");
+  }
 };
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  
+  const email = loginUsername.value.trim() + "@financepro.com";
+  const pass = loginPassword.value.trim();
 
-  const response = await fetch(`${API_URL}/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username: loginUsername.value.trim(),
-      password: loginPassword.value.trim()
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || !data.success) {
-    alert(data.message || "Erro no login.");
-    return;
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, pass);
+    currentUser = { id: userCredential.user.uid, email: userCredential.user.email };
+    localStorage.setItem("currentUser", JSON.stringify(currentUser));
+    authScreen.classList.add("hidden");
+    app.classList.remove("hidden");
+    await refreshUI();
+  } catch (err) {
+    console.error(err);
+    showToast("Erro no login. Verifique suas credenciais.", "error");
   }
-
-  currentUser = data.user;
-  localStorage.setItem("currentUser", JSON.stringify(currentUser));
-  authScreen.classList.add("hidden");
-  app.classList.remove("hidden");
-  await refreshUI();
 });
 
 registerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-
-  const response = await fetch(`${API_URL}/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: registerName.value.trim(),
-      username: registerUsername.value.trim(),
-      password: registerPassword.value.trim()
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || !data.success) {
-    alert(data.message || "Erro ao cadastrar usuário.");
-    return;
+  
+  const email = registerUsername.value.trim() + "@financepro.com";
+  const pass = registerPassword.value.trim();
+  
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+    showToast("Usuário criado com sucesso! Faça seu login.", "success");
+    registerForm.reset();
+    document.querySelector('[data-auth="login"]').click();
+    
+    // Auto logout immediately after register so the user can login explicitly
+    await signOut(auth);
+  } catch(err) {
+    console.error(err);
+    showToast("Erro ao cadastrar usuário.", "error");
   }
-
-  alert("Usuário criado com sucesso.");
-  registerForm.reset();
-  document.querySelector('[data-auth="login"]').click();
 });
 
 financeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const editId = document.getElementById("editId").value;
-
   const payload = {
-    user_id: currentUser.id,
+    profile_id: activeProfileId,
     category_id: categoryId.value || null,
     type: document.getElementById("entryType").value,
     description: document.getElementById("description").value.trim(),
@@ -558,59 +893,83 @@ financeForm.addEventListener("submit", async (event) => {
     transaction_date: document.getElementById("transactionDate").value
   };
 
-  let response;
-
-  if (editId) {
-    response = await fetch(`${API_URL}/transactions/${editId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-  } else {
-    response = await fetch(`${API_URL}/transactions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+  try {
+    if (editId) {
+      await updateDoc(doc(db, "transactions", editId), payload);
+    } else {
+      await addDoc(collection(db, "transactions"), payload);
+    }
+    showToast("Lançamento salvo com sucesso!", "success");
+    financeForm.reset();
+    document.getElementById("editId").value = "";
+    renderCategoryOptions(entryType.value);
+    await refreshUI();
+  } catch (err) {
+    console.error(err);
+    showToast("Erro ao salvar lançamento.", "error");
   }
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    alert(data?.message || "Erro ao salvar lançamento.");
-    return;
-  }
-
-  financeForm.reset();
-  document.getElementById("editId").value = "";
-  renderCategoryOptions(entryType.value);
-  await refreshUI();
 });
 
 goalForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const response = await fetch(`${API_URL}/goals`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: currentUser.id,
-      name: document.getElementById("goalName").value.trim(),
-      target_amount: Number(document.getElementById("goalTarget").value),
-      deadline: document.getElementById("goalDeadline").value || null
-    })
-  });
+  const payload = {
+    profile_id: activeProfileId,
+    name: document.getElementById("goalName").value.trim(),
+    target_amount: Number(document.getElementById("goalTarget").value),
+    deadline: document.getElementById("goalDeadline").value || null
+  };
 
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    alert(data?.message || "Erro ao criar meta.");
-    return;
+  try {
+    await addDoc(collection(db, "goals"), payload);
+    showToast("Nova meta criada com sucesso!", "success");
+    goalForm.reset();
+    await refreshUI();
+  } catch (err) {
+    console.error(err);
+    showToast("Erro ao criar meta.", "error");
   }
-
-  goalForm.reset();
-  await refreshUI();
 });
+
+if (profileSelector) {
+  profileSelector.addEventListener("change", async (e) => {
+    activeProfileId = Number(e.target.value);
+    localStorage.setItem("activeProfileId", activeProfileId);
+    await refreshUI();
+  });
+}
+
+const createProfileLink = document.getElementById("createProfileLink");
+if (createProfileLink) {
+  createProfileLink.addEventListener("click", () => document.querySelector(".tab-btn[data-tab='perfis']").click());
+}
+
+if (noProfileMsg) {
+  noProfileMsg.addEventListener("click", () => document.querySelector(".tab-btn[data-tab='perfis']").click());
+}
+
+if (profileForm) {
+  profileForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("profileName").value.trim();
+
+    try {
+      const docRef = await addDoc(collection(db, "profiles"), {
+        user_id: currentUser.id,
+        name: name,
+        created_at: new Date().toISOString()
+      });
+      showToast(`O perfil "${name}" foi criado!`, "success");
+      profileForm.reset();
+      activeProfileId = docRef.id;
+      localStorage.setItem("activeProfileId", activeProfileId);
+      await refreshUI();
+    } catch(err) {
+      console.error(err);
+      showToast("Erro ao criar perfil.", "error");
+    }
+  });
+}
 
 cancelEditBtn.addEventListener("click", () => {
   financeForm.reset();
@@ -618,12 +977,7 @@ cancelEditBtn.addEventListener("click", () => {
   renderCategoryOptions(entryType.value);
 });
 
-logoutBtn.addEventListener("click", () => {
-  currentUser = null;
-  localStorage.removeItem("currentUser");
-  app.classList.add("hidden");
-  authScreen.classList.remove("hidden");
-});
+
 
 entryType.addEventListener("change", () => {
   renderCategoryOptions(entryType.value);
@@ -643,7 +997,6 @@ document.querySelectorAll(".tab-btn").forEach((button) => {
     }
   });
 });
-
 function switchTab(tabId) {
   document.querySelectorAll(".tab-content").forEach((tab) => tab.classList.remove("active"));
   document.querySelectorAll(".tab-btn").forEach((button) => button.classList.remove("active"));
@@ -653,8 +1006,35 @@ function switchTab(tabId) {
 
   if (selectedTab) selectedTab.classList.add("active");
   if (selectedButton) selectedButton.classList.add("active");
-}
 
+  const titleEl = document.getElementById("pageTitle");
+  const subtitleEl = document.getElementById("pageSubtitle");
+  const summaryCards = document.querySelector(".summary-cards");
+
+  if (summaryCards) {
+    if (tabId === "dashboard" || tabId === "lancamentos") {
+      summaryCards.style.display = "grid";
+    } else {
+      summaryCards.style.display = "none";
+    }
+  }
+
+  if (titleEl && subtitleEl && pageTitles[tabId]) {
+    titleEl.style.opacity = "0.4";
+    titleEl.style.transform = "translateY(4px)";
+    subtitleEl.style.opacity = "0.4";
+    subtitleEl.style.transform = "translateY(4px)";
+
+    setTimeout(() => {
+      titleEl.textContent = pageTitles[tabId].title;
+      subtitleEl.textContent = pageTitles[tabId].subtitle;
+      titleEl.style.opacity = "1";
+      titleEl.style.transform = "translateY(0)";
+      subtitleEl.style.opacity = "1";
+      subtitleEl.style.transform = "translateY(0)";
+    }, 120);
+  }
+}
 document.querySelectorAll(".auth-tab").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".auth-tab").forEach((tab) => tab.classList.remove("active"));
@@ -679,15 +1059,310 @@ document.querySelectorAll(".switch-auth").forEach((element) => {
   });
 });
 
-async function init() {
+const calcForm = document.getElementById("calcForm");
+if (calcForm) {
+  calcForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    
+    const initial = parseFloat(document.getElementById('calcInitial').value) || 0;
+    const monthly = parseFloat(document.getElementById('calcMonthly').value) || 0;
+    let rate = parseFloat(document.getElementById('calcRate').value) || 0;
+    const rateType = document.getElementById('calcRateType').value;
+    const years = parseInt(document.getElementById('calcYears').value) || 0;
+    const extraMonths = parseInt(document.getElementById('calcMonths').value) || 0;
+    const startDate = new Date(document.getElementById('calcDate').value + 'T12:00:00');
+
+    const totalMonths = (years * 12) + extraMonths;
+    if (totalMonths <= 0) {
+      showToast("A duração precisa ser maior que 0 meses.", "warning");
+      return;
+    }
+
+    rate = rate / 100;
+    let monthlyRate = (rateType === 'anual') ? (Math.pow(1 + rate, 1/12) - 1) : rate;
+
+    let currentBalance = initial;
+    let totalInvested = initial;
+    
+    let labels = [];
+    let balances = [];
+    let investeds = [];
+
+    let currentDate = new Date(startDate);
+    
+    for(let i = 0; i <= totalMonths; i++) {
+      labels.push(currentDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }));
+      balances.push(currentBalance);
+      investeds.push(totalInvested);
+      
+      if (i < totalMonths) {
+        currentBalance = currentBalance * (1 + monthlyRate) + monthly;
+        totalInvested += monthly;
+        currentDate.setMonth(currentDate.getMonth() + 1);
+      }
+    }
+
+    document.getElementById('calcTotalInvested').innerText = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalInvested);
+    document.getElementById('calcTotalInterest').innerText = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(currentBalance - totalInvested);
+    document.getElementById('calcFinalBalance').innerText = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(currentBalance);
+
+
+    buildCompoundChart(labels, balances, investeds);
+  });
+}
+
+function buildCompoundChart(labels, balances, investeds) {
+  if (compoundChart) compoundChart.destroy();
+  
+  compoundChart = new Chart(document.getElementById("compoundChart"), {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: "Saldo Total",
+          data: balances,
+          borderColor: "#67aefc",
+          backgroundColor: "rgba(103, 174, 252, 0.18)",
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 6
+        },
+        {
+          label: "Total Investido",
+          data: investeds,
+          borderColor: "#64748b",
+          backgroundColor: "transparent",
+          borderDash: [5, 5],
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 6
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: "#64748b", usePointStyle: true, padding: 20 } },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return context.dataset.label + ': ' + new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.parsed.y);
+            }
+          }
+        }
+      },
+      scales: chartScales()
+    }
+  });
+}
+
+const descInput = document.getElementById("description");
+const suggBox = document.getElementById("descriptionSuggestions");
+
+if (descInput && suggBox) {
+  descInput.addEventListener("input", () => {
+    const val = descInput.value.toLowerCase().trim();
+    if (!val) {
+      suggBox.classList.add("hidden");
+      return;
+    }
+    const uniqueDescs = [...new Set(transactions.map(t => t.description))];
+    const matches = uniqueDescs.filter(d => d.toLowerCase().includes(val));
+    
+    if (matches.length > 0) {
+      suggBox.innerHTML = matches.map(m => `<div class="suggestion-item">${m}</div>`).join("");
+      suggBox.classList.remove("hidden");
+    } else {
+      suggBox.classList.add("hidden");
+    }
+  });
+
+  suggBox.addEventListener("click", (e) => {
+    if (e.target.classList.contains("suggestion-item")) {
+      descInput.value = e.target.textContent;
+      suggBox.classList.add("hidden");
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!descInput.contains(e.target) && !suggBox.contains(e.target)) {
+      suggBox.classList.add("hidden");
+    }
+  });
+}
+
+function generateInsights() {
+  const el = document.getElementById("insightText");
+  if (!el) return;
+
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const today = new Date();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const currentDay = today.getDate();
+
+  const monthlyTrans = transactions.filter(t => {
+    const d = new Date(t.transaction_date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+
+  const income = monthlyTrans.filter(t => t.type === "income").reduce((acc, t) => acc + t.amount, 0);
+  const expense = monthlyTrans.filter(t => t.type === "expense").reduce((acc, t) => acc + t.amount, 0);
+
+  if (income === 0 && expense === 0) {
+    el.innerHTML = "Não há movimentações neste mês para gerar previsões de gastos.";
+    return;
+  }
+
+  const avgDailyExpense = expense / currentDay;
+  const predictedExpense = avgDailyExpense * daysInMonth;
+  const diff = income - predictedExpense;
+
+  let msg = `Neste mês, sua velocidade de gasto é de <strong>${formatCurrency(avgDailyExpense)} ao dia</strong>. `;
+  
+  if (expense === 0) {
+    msg = `Seu orçamento está impecável este mês! Nenhuma despesa registrada ainda.`;
+  } else if (diff >= 0) {
+    msg += `<br><span style="color: var(--success);">Neste ritmo, a previsão é terminar o mês com saldo positivo de aproximadamente <strong>${formatCurrency(diff)}</strong>. Excelente controle!</span>`;
+  } else {
+    msg += `<br><span style="color: var(--danger);">⚠ Atenção: Mantendo os gastos diários neste nível, você deve devassar seu teto e ultrapassar as receitas em <strong>${formatCurrency(Math.abs(diff))}</strong> até o fim do mês. Pisando no freio!</span>`;
+  }
+
+  el.innerHTML = msg;
+}
+
+const profileCustomWrapper = document.getElementById("profileCustomWrapper");
+const profileCustomTrigger = document.getElementById("profileCustomTrigger");
+const profileCustomOptions = document.getElementById("profileCustomOptions");
+
+if (profileCustomWrapper && profileCustomTrigger) {
+  profileCustomTrigger.addEventListener("click", () => {
+    profileCustomWrapper.classList.toggle("open");
+  });
+
+  profileCustomOptions.addEventListener("click", async (e) => {
+    const opt = e.target.closest(".custom-option");
+    if (opt) {
+      const newId = opt.dataset.id;
+      if (newId && newId != activeProfileId) {
+        activeProfileId = newId;
+        localStorage.setItem("activeProfileId", activeProfileId);
+        profileCustomWrapper.classList.remove("open");
+        await refreshUI();
+      } else {
+        profileCustomWrapper.classList.remove("open");
+      }
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!profileCustomWrapper.contains(e.target)) {
+      profileCustomWrapper.classList.remove("open");
+    }
+  });
+}
+
+async function initApp() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch((err) => console.log('SW falhou', err));
+  }
+
   filters.dateFrom = "";
   filters.dateTo = "";
 
-  if (currentUser) {
+  const valid = await loadCurrentUser();
+  if (valid) {
     authScreen.classList.add("hidden");
     app.classList.remove("hidden");
     await refreshUI();
   }
 }
 
-init();
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+      // onAuthStateChanged in loadCurrentUser handles UI reset automatically
+    } catch(err) {
+      console.error(err);
+      showToast("Erro ao deslogar.", "error");
+    }
+  });
+}
+
+initApp();
+const pageTitles = {
+  dashboard: {
+    title: "Visão geral",
+    subtitle: "Resumo financeiro e desempenho visual."
+  },
+  lancamentos: {
+    title: "Lançamentos",
+    subtitle: "Gerencie receitas e despesas com mais controle."
+  },
+  metas: {
+    title: "Metas financeiras",
+    subtitle: "Acompanhe seus objetivos e progresso."
+  },
+  perfis: {
+    title: "Perfis de Controle",
+    subtitle: "Alterne entre diferentes áreas financeiras (ex: Casa, Sítio)."
+  },
+  calculadora: {
+    title: "Calculadora de Juros",
+    subtitle: "Simule a evolução do seu patrimônio a longo prazo."
+  },
+  historico: {
+    title: "Pesquisa e Histórico",
+    subtitle: "Busque transações ou navegue pelo calendário de meses passados."
+  }
+};
+
+const globalSearch = document.getElementById("globalSearch");
+if (globalSearch) {
+  globalSearch.addEventListener("input", (e) => {
+    const val = e.target.value.toLowerCase().trim();
+    if (!val) {
+      renderHistoryTab();
+      return;
+    }
+    
+    const matched = transactions.filter(t => 
+      t.description.toLowerCase().includes(val) || 
+      (t.category_name && t.category_name.toLowerCase().includes(val)) ||
+      String(t.amount).includes(val)
+    );
+
+    const grid = document.getElementById("historyGrid");
+    
+    grid.innerHTML = `
+      <div style="grid-column: 1 / -1; background: var(--panel-strong); border-radius: 20px; padding: 0; overflow: hidden; border: 1px solid rgba(168,187,214,0.3); box-shadow: 0 10px 30px rgba(17,35,60,0.06);">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Mês</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr></thead>
+            <tbody>
+              ${matched.map(m => {
+                const typeLabel = m.type === "income" ? "Receita" : "Despesa";
+                const [y, mm, d] = m.transaction_date.split('-');
+                return `
+                  <tr>
+                    <td>${mm}/${y}</td>
+                    <td><span class="tag ${m.type === "income" ? "tag-income" : "tag-expense"}">${typeLabel}</span></td>
+                    <td>${m.category_name || "-"}</td>
+                    <td>${m.description}</td>
+                    <td>${formatCurrency(m.amount)}</td>
+                  </tr>
+                `;
+              }).join("")}
+              ${matched.length === 0 ? `<tr><td colspan="5" style="text-align: center; padding: 32px; color: var(--muted); font-size: 1.1rem;">Nada encontrado para "${val}".</td></tr>` : ''}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  });
+}
